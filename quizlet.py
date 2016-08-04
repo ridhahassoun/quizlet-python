@@ -6,19 +6,28 @@ from uuid import uuid4
 import requests
 import webbrowser
 
+import errors
+
 class QuizletSession():
     """docstring for QuizletSession"""
-    def __init__(self, scope="read"):
+    def __init__(self, client_id, client_secret, scope="read"):
         state = str(uuid4()) # generate a string to send and receive to verify and prevent CSRF attacks
-        print(state)
 
-        url = _make_authorization_url(state, scope)
+        # Check to see if scopes requested are valid
+        valid_scopes = ["read", "write_set", "write_group"]
+        invalid_scopes = [inv for inv in scope.split(" ") if inv not in valid_scopes]
+
+        # If invalid scopes are present, end OAuth2 flow and raise ScopeError
+        if invalid_scopes: raise errors.ScopeError(invalid_scopes)
+
+        url = _make_authorization_url(client_id, state, scope)
         webbrowser.open_new(url)
 
         server = HTTPServer(('', 8000), _QuizletAuthorizationHTTPHandler)
-        server.sent_state = state
-
+        server.data = (client_id, client_secret, state)
         server.handle_request()
+
+        self._access_token = server.access_token
 
 class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
     
@@ -39,30 +48,37 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
         # Check to see if user allowed access and Quizlet returned an authorization code
         if "code" in self.path:
             queries = parse.urlparse(self.path).query
-            
+            client_id, client_secret, state = self.server.data
+
             # make sure the state we sent is the same as the state returned
-            if parse.parse_qs(queries)["state"][0] == self.server.sent_state: 
+            if parse.parse_qs(queries)["state"][0] == state: 
                 auth_code = parse.parse_qs(queries)["code"][0]
 
-                access_token = _get_access_token(auth_code)
-                print(access_token)
+                access_token = _get_access_token(client_id, client_secret, auth_code)
+                #TODO: parsing error if returned
+                self.server.access_token = access_token
 
-def _make_authorization_url(state, scope):
-    params = {"client_id": CLIENT_ID,
-              "response_type": "code",
-              "state": state,
-              "scope": scope}
+    # to remove logging to console every time a request is made
+    def log_message(self, format, *args): 
+        return
+
+def _make_authorization_url(client_id, state, scope):
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "state": state,
+        "scope": scope
+    }
     url = "https://quizlet.com/authorize?" + parse.urlencode(params)
 
-    # convoluted return statement to return a named tuple, for better readability
-    # state is also returned in order to verify with the state Quizlet's API returns
     return url
 
-def _get_access_token(authorization_code):
-    client_auth = requests.auth.HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET)
-    post_data = {"grant_type": "authorization_code",
-                 "code": authorization_code,
-                 "redirect_uri": "http://localhost:8000/"
+def _get_access_token(client_id, client_secret, authorization_code):
+    client_auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+    post_data = {
+        "grant_type": "authorization_code",
+        "code": authorization_code,
+        "redirect_uri": "http://localhost:8000/"
     }
     response = requests.post("https://api.quizlet.com/oauth/token", auth=client_auth, data=post_data)
     token_json = response.json()
