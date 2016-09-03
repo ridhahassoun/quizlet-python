@@ -12,6 +12,9 @@ import errors
 class QuizletSession():
     """docstring for QuizletSession"""
     def __init__(self, client_id, client_secret, scope="read"):
+        self._client_id = client_id
+        self._client_secret = client_secret
+
         state = str(uuid4()) # generate a string to send and receive to verify and prevent CSRF attacks
 
         # Check to see if scopes requested are valid
@@ -21,14 +24,38 @@ class QuizletSession():
         # If invalid scopes are present, end OAuth2 flow and raise ScopeError
         if invalid_scopes: raise errors.ScopeError(invalid_scopes)
 
-        url = _make_authorization_url(client_id, state, scope)
+        url = self._make_authorization_url(client_id, state, scope)
         webbrowser.open_new(url)
 
         server = HTTPServer(('', 8000), _QuizletAuthorizationHTTPHandler)
-        server.data = (client_id, client_secret, state)
+        server.data = (self._client_id, self._client_secret, state)
         server.handle_request()
 
         self._access_token = server.access_token
+
+    def _make_authorization_url(self, client_id, state, scope):
+        params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "state": state,
+            "scope": scope
+        }
+        url = "https://quizlet.com/authorize?" + parse.urlencode(params)
+
+        return url
+
+    # Properties
+    @property
+    def client_id(self):
+        return self._client_id
+
+    @property
+    def client_secret(self):
+        return self._client_secret
+
+    @property
+    def access_token(self):
+        return self._access_token
 
 class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
     
@@ -55,7 +82,7 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
             if parse.parse_qs(queries)["state"][0] == state: 
                 auth_code = parse.parse_qs(queries)["code"][0]
 
-                access_token = _get_access_token(client_id, client_secret, auth_code)
+                access_token = self._get_access_token(client_id, client_secret, auth_code)
                 #TODO: parsing error if returned
                 self.server.access_token = access_token
 
@@ -63,32 +90,21 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args): 
         return
 
-def _make_authorization_url(client_id, state, scope):
-    params = {
-        "client_id": client_id,
-        "response_type": "code",
-        "state": state,
-        "scope": scope
-    }
-    url = "https://quizlet.com/authorize?" + parse.urlencode(params)
+    def _get_access_token(self, client_id, client_secret, authorization_code):
+        base64string = base64.b64encode(bytes("{}:{}".format(client_id, client_secret), "UTF-8"))
+        header = {"Authorization": "Basic {}".format(base64string.decode("UTF-8"))}
+        post_data = {
+            "grant_type": "authorization_code",
+            "code": authorization_code,
+            "redirect_uri": "http://localhost:8000/"
+        }
+        data = parse.urlencode(post_data).encode("UTF-8")
 
-    return url
+        quizlet_request = request.Request("https://api.quizlet.com/oauth/token",
+                                          data=data,
+                                          headers=header)
 
-def _get_access_token(client_id, client_secret, authorization_code):
-    base64string = base64.b64encode(bytes("{}:{}".format(client_id, client_secret), "UTF-8"))
-    header = {"Authorization": "Basic {}".format(base64string.decode("UTF-8"))}
-    post_data = {
-        "grant_type": "authorization_code",
-        "code": authorization_code,
-        "redirect_uri": "http://localhost:8000/"
-    }
-    data = parse.urlencode(post_data).encode("UTF-8")
+        response = request.urlopen(quizlet_request)
 
-    quizlet_request = request.Request("https://api.quizlet.com/oauth/token",
-                                      data=data,
-                                      headers=header)
-
-    response = request.urlopen(quizlet_request)
-
-    token_json = json.loads(response.read().decode("UTF-8"))
-    return token_json
+        token_json = json.loads(response.read().decode("UTF-8"))
+        return token_json
