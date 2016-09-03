@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib import parse
+from urllib import parse, request
 from uuid import uuid4
-import requests
 import webbrowser
+import base64
+import json
 
 import errors
 
@@ -74,12 +75,20 @@ def _make_authorization_url(client_id, state, scope):
     return url
 
 def _get_access_token(client_id, client_secret, authorization_code):
-    client_auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+    base64string = base64.b64encode(bytes("{}:{}".format(client_id, client_secret), "UTF-8"))
+    header = {"Authorization": "Basic {}".format(base64string.decode("UTF-8"))}
     post_data = {
         "grant_type": "authorization_code",
         "code": authorization_code,
         "redirect_uri": "http://localhost:8000/"
     }
-    response = requests.post("https://api.quizlet.com/oauth/token", auth=client_auth, data=post_data)
-    token_json = response.json()
+    data = parse.urlencode(post_data).encode("UTF-8")
+
+    quizlet_request = request.Request("https://api.quizlet.com/oauth/token",
+                                      data=data,
+                                      headers=header)
+
+    response = request.urlopen(quizlet_request)
+
+    token_json = json.loads(response.read().decode("UTF-8"))
     return token_json
