@@ -24,14 +24,16 @@ class QuizletSession():
         # If invalid scopes are present, end OAuth2 flow and raise ScopeError
         if invalid_scopes: raise errors.ScopeError(invalid_scopes)
 
-        url = self._make_authorization_url(client_id, state, scope)
+        url = self._make_authorization_url(self._client_id, state, scope)
         webbrowser.open_new(url)
 
         server = HTTPServer(('', 8000), _QuizletAuthorizationHTTPHandler)
         server.data = (self._client_id, self._client_secret, state)
         server.handle_request()
 
-        self._access_token = server.access_token
+        access_token_json = server.access_token
+        self._user_id = access_token_json["user_id"]
+        self._access_token = access_token_json["access_token"]
 
     def _make_authorization_url(self, client_id, state, scope):
         params = {
@@ -53,6 +55,10 @@ class QuizletSession():
     def client_secret(self):
         return self._client_secret
 
+    @property
+    def user_id(self):
+        return self._user_id
+    
     @property
     def access_token(self):
         return self._access_token
