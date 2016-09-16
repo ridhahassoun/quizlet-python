@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib import parse, request
-from uuid import uuid4
-import webbrowser
 import base64
 import json
+import uuid
+import webbrowser
+
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib import parse, request
 
 import errors
 
+
 class QuizletSession():
     """docstring for QuizletSession"""
+
     def __init__(self, client_id, client_secret, scope="read"):
         self._client_id = client_id
         self._client_secret = client_secret
 
-        state = str(uuid4()) # generate a string to send and receive to verify and prevent CSRF attacks
+        # Generate string to send and receive to verify request
+        state = str(uuid.uuid4())
 
         # Check to see if scopes requested are valid
         valid_scopes = ["read", "write_set", "write_group"]
-        invalid_scopes = [inv for inv in scope.split(" ") if inv not in valid_scopes]
+        invalid_scopes = [inv for inv in scope.split(" ")
+                          if inv not in valid_scopes]
 
         # If invalid scopes are present, end OAuth2 flow and raise ScopeError
-        if invalid_scopes: raise errors.ScopeError(invalid_scopes)
+        if invalid_scopes:
+            raise errors.ScopeError(invalid_scopes)
 
         url = self._make_authorization_url(self._client_id, state, scope)
         webbrowser.open_new(url)
@@ -58,14 +64,14 @@ class QuizletSession():
     @property
     def user_id(self):
         return self._user_id
-    
+
     @property
     def access_token(self):
         return self._access_token
 
+
 class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
-    
-    """A subclass of BaseHTTPRequestHandler that is used internally  
+    """A subclass of BaseHTTPRequestHandler that is used internally
     to help manage the redirect from Quizlet and complete the
     authentication process.
 
@@ -79,26 +85,31 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
 
         self.wfile.write(bytes("You may close the window now.", "UTF-8"))
 
-        # Check to see if user allowed access and Quizlet returned an authorization code
+        # Check to see if user allowed access and Quizlet returned an
+        # authorization code
         if "code" in self.path:
             queries = parse.urlparse(self.path).query
             client_id, client_secret, state = self.server.data
 
             # make sure the state we sent is the same as the state returned
-            if parse.parse_qs(queries)["state"][0] == state: 
+            if parse.parse_qs(queries)["state"][0] == state:
                 auth_code = parse.parse_qs(queries)["code"][0]
 
-                access_token = self._get_access_token(client_id, client_secret, auth_code)
-                #TODO: parsing error if returned
+                access_token = self._get_access_token(client_id, client_secret,
+                                                      auth_code)
+                # TODO: parsing error if returned
                 self.server.access_token = access_token
 
     # to remove logging to console every time a request is made
-    def log_message(self, format, *args): 
+    def log_message(self, format, *args):
         return
 
     def _get_access_token(self, client_id, client_secret, authorization_code):
-        base64string = base64.b64encode(bytes("{}:{}".format(client_id, client_secret), "UTF-8"))
-        header = {"Authorization": "Basic {}".format(base64string.decode("UTF-8"))}
+        base64string = base64.b64encode(
+            bytes("{}:{}".format(client_id, client_secret), "UTF-8"))
+        header = {
+            "Authorization": "Basic {}".format(base64string.decode("UTF-8"))
+        }
         post_data = {
             "grant_type": "authorization_code",
             "code": authorization_code,
@@ -106,11 +117,11 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
         }
         data = parse.urlencode(post_data).encode("UTF-8")
 
-        quizlet_request = request.Request("https://api.quizlet.com/oauth/token",
-                                          data=data,
-                                          headers=header)
+        qzlt_request = request.Request("https://api.quizlet.com/oauth/token",
+                                       data=data,
+                                       headers=header)
 
-        response = request.urlopen(quizlet_request)
+        response = request.urlopen(qzlt_request)
 
         token_json = json.loads(response.read().decode("UTF-8"))
         return token_json
