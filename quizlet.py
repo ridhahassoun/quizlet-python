@@ -9,6 +9,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib import parse, request
 
 import errors
+import users
 
 
 class QuizletSession():
@@ -40,6 +41,19 @@ class QuizletSession():
         access_token_json = server.access_token
         self._user_id = access_token_json["user_id"]
         self._access_token = access_token_json["access_token"]
+
+    def get_current_user(self):
+        header = {
+            "Authorization": "Bearer {}".format(self.access_token)
+        }
+        api_url = "https://api.quizlet.com/2.0/users/{}".format(self.user_id)
+
+        qzlt_request = request.Request(api_url, headers=header)
+        response = request.urlopen(qzlt_request)
+        user_json = json.loads(response.read().decode("UTF-8"))
+
+        current_user = users.User(json=user_json)
+        return current_user
 
     def _make_authorization_url(self, client_id, state, scope):
         params = {
