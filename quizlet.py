@@ -6,9 +6,10 @@ import uuid
 import webbrowser
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib import parse, request
+from urllib import parse, request, error
 
 import errors
+import users
 
 
 class QuizletSession():
@@ -30,16 +31,62 @@ class QuizletSession():
         if invalid_scopes:
             raise errors.ScopeError(invalid_scopes)
 
+        # Prepare authorization URL for OAuth2 flow
         url = self._make_authorization_url(self._client_id, state, scope)
         webbrowser.open_new(url)
 
+        # Set up local server to receive redirect and handle it
         server = HTTPServer(('', 8000), _QuizletAuthorizationHTTPHandler)
         server.data = (self._client_id, self._client_secret, state)
         server.handle_request()
 
+        # After handle_request() completes, retrieve access token
         access_token_json = server.access_token
-        self._user_id = access_token_json["user_id"]
-        self._access_token = access_token_json["access_token"]
+        self.user_id = access_token_json["user_id"]
+        self.access_token = access_token_json["access_token"]
+        self.expiration = access_token_json["expires_in"]
+
+    @classmethod
+    def using_access_token(cls, user_id, access_token):
+        """Creates a new session without going through OAuth2 flow.
+        Requires both user's user ID and access token."""
+
+        try:
+            # Run a test request to make sure access token is valid
+            header = {
+                "Authorization": "Bearer {}".format(access_token)
+            }
+            api_url = "https://api.quizlet.com/2.0/sets/415"
+
+            qzlt_request = request.Request(api_url, headers=header)
+            request.urlopen(qzlt_request)  # if invalid, will raise HTTPError
+
+            # Create session if access token is valid
+            session = super().__new__(cls)
+            session.user_id = user_id
+            session.access_token = access_token
+
+            return session
+        except error.HTTPError as e:
+            print(e, "The access token provided has expired.")
+            return None
+
+    def get_current_user(self):
+        """Returns the current authenticated user."""
+
+        header = {
+            "Authorization": "Bearer {}".format(self.access_token)
+        }
+        api_url = "https://api.quizlet.com/2.0/users/{}".format(self.user_id)
+
+        # making a GET request for current user
+        qzlt_request = request.Request(api_url, headers=header)
+        response = request.urlopen(qzlt_request)
+
+        user_json = json.loads(response.read().decode("UTF-8"))
+        current_user = users.User(user_json, self.access_token)
+
+        return current_user
 
     def _make_authorization_url(self, client_id, state, scope):
         params = {
@@ -51,23 +98,6 @@ class QuizletSession():
         url = "https://quizlet.com/authorize?" + parse.urlencode(params)
 
         return url
-
-    # Properties
-    @property
-    def client_id(self):
-        return self._client_id
-
-    @property
-    def client_secret(self):
-        return self._client_secret
-
-    @property
-    def user_id(self):
-        return self._user_id
-
-    @property
-    def access_token(self):
-        return self._access_token
 
 
 class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
@@ -105,6 +135,10 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
         return
 
     def _get_access_token(self, client_id, client_secret, authorization_code):
+        """This function sets up POST request for access token and then requests
+        it. It returns access token provided by Quizlet after OAuth2 flow
+        has completed."""
+
         base64string = base64.b64encode(
             bytes("{}:{}".format(client_id, client_secret), "UTF-8"))
         header = {
@@ -117,6 +151,7 @@ class _QuizletAuthorizationHTTPHandler(BaseHTTPRequestHandler):
         }
         data = parse.urlencode(post_data).encode("UTF-8")
 
+        # making a POST request to get access token
         qzlt_request = request.Request("https://api.quizlet.com/oauth/token",
                                        data=data,
                                        headers=header)
