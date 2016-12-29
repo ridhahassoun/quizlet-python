@@ -6,7 +6,7 @@ import uuid
 import webbrowser
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib import parse, request
+from urllib import parse, request, error
 
 import errors
 import users
@@ -51,10 +51,25 @@ class QuizletSession():
         """Creates a new session without going through OAuth2 flow.
         Requires both user's user ID and access token."""
 
-        session = super().__new__(cls)
-        session.user_id = user_id
-        session.access_token = access_token
-        return session
+        try:
+            # Run a test request to make sure access token is valid
+            header = {
+                "Authorization": "Bearer {}".format(access_token)
+            }
+            api_url = "https://api.quizlet.com/2.0/sets/415"
+
+            qzlt_request = request.Request(api_url, headers=header)
+            request.urlopen(qzlt_request)  # if invalid, will raise HTTPError
+
+            # Create session if access token is valid
+            session = super().__new__(cls)
+            session.user_id = user_id
+            session.access_token = access_token
+
+            return session
+        except error.HTTPError as e:
+            print(e, "The access token provided has expired.")
+            return None
 
     def get_current_user(self):
         """Returns the current authenticated user."""
@@ -67,9 +82,10 @@ class QuizletSession():
         # making a GET request for current user
         qzlt_request = request.Request(api_url, headers=header)
         response = request.urlopen(qzlt_request)
-        user_json = json.loads(response.read().decode("UTF-8"))
 
-        current_user = users.User(json=user_json)
+        user_json = json.loads(response.read().decode("UTF-8"))
+        current_user = users.User(user_json, self.access_token)
+
         return current_user
 
     def _make_authorization_url(self, client_id, state, scope):
