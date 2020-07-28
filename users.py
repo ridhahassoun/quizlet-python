@@ -6,7 +6,7 @@ from datetime import datetime
 from urllib import request
 
 
-class User():
+class User:
     """docstring for User"""
 
     def __init__(self, json, access_token):
@@ -23,7 +23,7 @@ class User():
         self.studied_sets = json["studied"]
         self.classes = json["groups"]
 
-        # for some reason, not everyone has this anymore
+        # cannot access favorites for user not authenticated
         if "favorite_sets" in json.keys():
             self.favorite_sets = json["favorite_sets"]
 

@@ -12,7 +12,7 @@ import errors
 import users
 
 
-class QuizletSession():
+class QuizletSession:
     """docstring for QuizletSession"""
 
     def __init__(self, client_id, client_secret, scope="read"):
